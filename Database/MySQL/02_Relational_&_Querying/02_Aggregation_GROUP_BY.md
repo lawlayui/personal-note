@@ -1,4 +1,4 @@
-## A. Konsep Dasar & Alur Kerja
+		## A. Konsep Dasar & Alur Kerja
 Operasi agregasi digunakan untuk mengolah banyak baris data menjadi satu laporan ringkasan.
 
 ### 1. Tanpa `GROUP BY`
