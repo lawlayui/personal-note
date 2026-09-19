@@ -26,32 +26,64 @@
 
 **4. Bounded Context**
 
-- Recipe Context -> Berfokus untuk menangani pembuatan resep sekaligus menu yang digunakan pelanggan.
-  - Tactical Design: 
-   - MenuRoot
-	- MenuRootId 
-	- MenuName 
-	- MenuDescription
-	- MenuPrice
-	- RecipeId
-
-   - RecipeRoot
-	- RecipeRoot
-	- RecipeName
-	- List<Material> materials
-		- MaterialId
-		- MaterialSKU
-
-- Order Context
--
-
-
-- Payment Context
-  - Tactical Design:
-   - PaymentRoot
-    - PaymentId
-	- AccountId
-	- TotalPrice 
-  
-- Inventory Context 
 - Account Context 
+	- Account
+		- Id
+		- Name
+		- Email
+		- Role ENUM(CUSTOMER, ADMIN)
+		- Status ENUM(ACTIVE, SUSPENDED, UNVERIFIED)
+		- CreatedAt
+		- UpdatedAt
+
+- Recipe Context 
+	- Recipe
+		- Id
+		- Name
+		- Description 
+		- List<Material> materials
+			- Id
+			- Quantity
+			- UOM 
+			- SKU
+
+- Menu Catalog Context -> Fokusnya sebagai master data.
+	- MenuItemRoot
+		- Id
+		- BranchId
+		- RecipeId
+
+- Branch Context  -> Fokusnya mengatur harga pada beda-beda branch dan . 
+	- Branch
+		- Id
+		- MenuId
+		- Price
+
+- Inventory Context  -> Berfokus untuk menangani stock bahan-bahan mentah kopi dan juga mengimplementasikan algoritma FEFO (First-Expired, First-out).
+	- InventoryItemRoot
+		- Id -> Tetap membutuhkan id unik, SKU tidak menjamin nilai unik dan bisa lebih dari satu produk bernilai SKU yang sama dikarenakan produk yang sama.
+		- SKU 
+		- name
+		- branchId
+		- received_date (YYYY-MM-DD HH:MM:SS)
+		- expired_date (YYYY-MM-DD)
+		 - quantity
+
+- Order Context -> Berfokus untuk menyediakan data sebelum payment context. 
+	- Order
+		- Id
+		- List<OrderItem> items
+			- OrderItemId 
+			- quantity 
+			- price 
+		- total_price 
+		- CreatedAt
+
+- Payment Context -> Integrasi payment gateway dan history transaksi.
+	   - PaymentRoot
+	    - Id
+		- AccountId
+		- TotalPrice 
+		- Status ENUM(PENDING, SUCCESS, FAILED, EXPIRED, REFUNED)
+		- ReferenceNo 
+		- CreatedAt
