@@ -1,89 +1,150 @@
-**1. Masalah Utama**
-**Masalah:** Setiap resep kopi memakan stok bahan mentah dalam takaran berbeda (misal: 1 Espresso = 18 gram Biji Kopi Arabica + 150ml Susu).
+**1. INVENTORY CONTEXT**
+Fokus pada pengelolaan stok bahan mentah di tingkat cabang dan penerapan algoritma FEFO (First-Expired, First-Out).
 
-**Masalah:** Satu _brand_ warung kopi punya 5 cabang. Harga menu dan ketersediaan stok bahan di Cabang A dan Cabang B bisa berbeda.
+**Events:**
 
-**Masalah:** Biji kopi yang sudah di-_roast_ atau susu cair punya tanggal kedaluwarsa.
+- **Publish:**
+    
+    - `InventoryDeletedEvent`
+    - `InventoryQuantityAdjusted`
 
-**2. Problem Space**
+- **Listener:**
+    
+    - `MenuSelectedEvent`
 
-**2.1 Core Domain**
-- Brand warung kopi memiliki harga menu tergantung cabangnya. 
+**Domain Service (FEFO Orchestration):**
 
-**2.2 Support Domain**
-- Inventory management dengan optimasi tanggal kadaluarsa FEFO (First-Expired, First-out). 
+- **FefoStockDeductionService / InventoryAllocationService**
+    
+    - `allocateStockFefo(branchId, sku, requiredQty)`: Menjalankan pemotongan stok berurutan berdasarkan `expired_date` terdekat.
+    - `findBatchesEligibleForDeduction(branchId, sku)`: Mengambil daftar batch `InventoryItemRoot` aktif lalu mengurutkannya secara _ascending_ berdasarkan `expired_date`.
 
-**2.3 Generic Domain**
-- Payment gateway 
-- Login/otoritasi 
+**InventoryItemRoot (Aggregate Root):**
 
-**3. Event Stroming**
+- `deductStock(amount)`: Memotong jumlah stok pada batch spesifik ini.
+- `restoreStock(amount)`: Mengembalikan stok akibat transaksi yang dibatalkan/gagal.
+- `adjustQuantity(newQty, reason)`: Mengoreksi stok fisik (misal: stok opname, bahan rusak, atau tumpah).
+- `markAsExpired()`: Menandai status item jika tanggal kedaluwarsa telah lewat.
+- `isExpired()`: Pengecekan kondisi apakah item sudah kedaluwarsa.
+- `hasEnoughQuantity(requestedQty)`: Memeriksa ketersediaan kuantitas stok pada batch ini.
 
-[ADMIN] -> (Menambahkan resep kopi sekaligus menu) -> [ResepKopiDitambahkan]
-[PELANGGAN] -> (Memilih resep kopi atau menu) -> [ResepDipilih]
-[PELANGGAN] -> (Melakukan pembayaran) -> [PaymentDiterima]
-[SISTEM] -> (Mengurangi stock)  -> [StockDikurangi]
+**2. RECIPE CONTEXT**
+Fokus pada formulasi resep menu, takaran porsi, dan pemetaan ke SKU bahan baku.
 
-**4. Bounded Context**
+**Events:**
 
-- Account Context 
-	- Account
-		- Id
-		- Name
-		- Email
-		- Role ENUM(CUSTOMER, ADMIN)
-		- Status ENUM(ACTIVE, SUSPENDED, UNVERIFIED)
-		- CreatedAt
-		- UpdatedAt
+- **Publish:**
+    - `RecipeCreatedEvent`
+    - `RecipeDeletedEvent`
 
-- Recipe Context 
-	- Recipe
-		- Id
-		- Name
-		- Description 
-		- List<Material> materials
-			- Id
-			- Quantity
-			- UOM 
-			- SKU
+- **Listener:**
+    - `InventoryDeletedEvent`
 
-- Menu Catalog Context -> Fokusnya sebagai master data.
-	- MenuItemRoot
-		- Id
-		- BranchId
-		- RecipeId
+**Recipe (Aggregate Root):**
 
-- Branch Context  -> Fokusnya mengatur harga pada beda-beda branch dan . 
-	- Branch
-		- Id
-		- MenuId
-		- Price
+- `addMaterialRequirement(sku, name, uom, qty)`: Menambahkan kebutuhan bahan baku ke dalam resep menggunakan SKU.
+- `removeMaterialRequirement(sku)`: Menghapus bahan baku dari komposisi resep.
+- `updateMaterialQuantity(sku, newQty)`: Memperbarui takaran/dosis bahan baku.
+- `extractRequiredSkus()`: Mengambil daftar SKU beserta takaran porsinya untuk 1 porsi resep.
+- `calculateBulkMaterialNeeds(orderQuantity)`: Mengalikan jumlah pesanan dengan takaran resep untuk kalkulasi total kebutuhan bahan baku.
 
-- Inventory Context  -> Berfokus untuk menangani stock bahan-bahan mentah kopi dan juga mengimplementasikan algoritma FEFO (First-Expired, First-out).
-	- InventoryItemRoot
-		- Id -> Tetap membutuhkan id unik, SKU tidak menjamin nilai unik dan bisa lebih dari satu produk bernilai SKU yang sama dikarenakan produk yang sama.
-		- SKU 
-		- name
-		- branchId
-		- received_date (YYYY-MM-DD HH:MM:SS)
-		- expired_date (YYYY-MM-DD)
-		 - quantity
+**3. MENU CATALOG CONTEXT**
+Fokus pada master data menu dan status ketersediaan di layar kasir/pelanggan.
 
-- Order Context -> Berfokus untuk menyediakan data sebelum payment context. 
-	- Order
-		- Id
-		- List<OrderItem> items
-			- OrderItemId 
-			- quantity 
-			- price 
-		- total_price 
-		- CreatedAt
+**Events:**
 
-- Payment Context -> Integrasi payment gateway dan history transaksi.
-	   - PaymentRoot
-	    - Id
-		- AccountId
-		- TotalPrice 
-		- Status ENUM(PENDING, SUCCESS, FAILED, EXPIRED, REFUNED)
-		- ReferenceNo 
-		- CreatedAt
+- **Publish:**
+    - `MenuSelectedEvent`
+    - `MenuDeletedEvent`
+	
+- **Listener:**
+    - `RecipeDeletedEvent`
+
+**MenuItemRoot (Aggregate Root):**
+
+- `markAsAvailable()`: Mengubah status menu menjadi `Available`.
+- `markAsOutOfStock()`: Mengubah status menu menjadi `Not_Available`.
+- `selectMenu(quantity)`: Menandai menu dipilih (memicu `MenuSelectedEvent`).
+- `changePrice(newPrice)`: Memperbarui harga jual menu.
+
+**Domain Service / Application Query:**
+
+- **MenuItemAvailabilityChecker**
+    
+    - `evaluateAvailability(recipeId, branchId)`: Evaluasi ketersediaan menu berdasarkan status stok bahan baku terkait.
+        
+
+**4. BRANCH CONTEXT**
+Fokus pada entitas cabang fisik toko.
+
+**Events:**
+
+- **Publish:** _(Belum ada)_
+    
+- **Listener:**
+    
+    - `MenuDeletedEvent`
+
+**Branch (Aggregate Root):**
+
+- `updateBranchInfo(name)`: Mengubah data profil cabang.
+
+**5. ORDER CONTEXT**
+Fokus pada penyusunan pesanan, perhitungan total belanja, dan lifecycle pesanan.
+
+**Events:**
+
+- **Publish:**
+
+    - `OrderCreatedEvent`
+	
+- **Listener:**
+	
+    - `MenuSelectedEvent`
+
+**Order (Aggregate Root):**
+
+- `addItem(menuItemId, quantity, unitPrice)`: Menambahkan item ke dalam daftar pesanan.
+- `removeItem(orderItemId)`: Menghapus item dari pesanan.
+- `calculateTotalPrice()`: Menghitung ulang total harga pesanan.
+- `checkout()`: Mengunci pesanan dan memicu `OrderCreatedEvent`.
+- `cancelOrder(reason)`: Membatalkan pesanan.
+- `markAsPaid()`: Menandai pesanan telah selesai dibayar.
+
+**6. PAYMENT CONTEXT**
+Fokus pada integrasi payment gateway dan histori transaksi pembayaran.
+
+**Events:**
+
+- **Publish:**
+    - `PaymentSuccessEvent`
+        
+- **Listener:**
+    - `OrderCreatedEvent`
+
+**PaymentRoot (Aggregate Root):**
+
+- `initiatePayment(accountId, amount)`: Membuka transaksi pembayaran baru dengan status `PENDING`.
+- `markAsSuccess(referenceNo)`: Menandai transaksi berhasil dan mencatat nomor referensi.
+- `markAsFailed(failureReason)`: Menandai pembayaran gagal.
+- `processRefund(refundReason)`: Memproses pengembalian dana.
+
+**Infrastructure / Integration Adapter:**
+
+- **PaymentGatewayAdapter**
+
+    - `sendPaymentRequest(paymentDetails)`: Menghubungkan domain internal dengan API eksternal payment gateway.
+
+**7. ACCOUNT CONTEXT**
+Fokus pada otentikasi, profil pengguna, dan hak akses.
+
+**Events:**
+
+- **Publish:** _(Optional - misal: AccountCreatedEvent)_
+- **Listener:** _(None)_
+
+**Account (Aggregate Root):**
+
+- `suspendAccount(reason)`: Mengubah status akun menjadi `SUSPENDED`.
+- `verifyAccount()`: Mengubah status dari `UNVERIFIED` menjadi `ACTIVE`.
+- `assignRole(newRole)`: Mengubah hak akses pengguna (misal: `CUSTOMER` atau `ADMIN`).
