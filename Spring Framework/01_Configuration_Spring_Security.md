@@ -98,3 +98,155 @@ public class UserController {
     }
 }
 ```
+
+**5. Security Filer Chain**
+
+**5.1 Aturan Otorisasi Request (`authorizeHttpRequest`)**
+Ini adalah bagian paling dasar untuk menentukan URL mana saja yang boleh diakses publik dan mana yang memerlukan otentikasi atau role tertentu.
+
+- **`permitAll()`**: Membuka akses untuk semua orang (publik).
+- **`authenticated()`**: Mewajibkan pengguna untuk login terlebih dahulu.
+- **`hasRole('ADMIN')`**: Membatasi akses khusus untuk pengguna dengan role tertentu.
+
+**5.2 Mekanisme Otentikasi (Form Login / HTTP Basic / OAuth2)
+Menentukan bagaimana pengguna membuktikan identitas mereka:
+
+- **`formLogin()`**: Untuk aplikasi berbasis HTML/UI yang membutuhkan halaman login kustom atau bawaan.
+- **`httpBasic()`**: Otentikasi dasar menggunakan header HTTP (sering digunakan untuk testing/API sederhana).
+- **`oauth2Login()`**: Mengaktifkan alur login menggunakan pihak ketiga (Google, GitHub, OIDC).
+
+**5.3 Konfigurasi CORS (Cross-Origin Resource Sharing)**
+Penting jika frontend (misal: React, Vue, Angular) dan backend Spring berjalan di domain atau port yang berbeda. CORS mengatur domain luar mana saja yang diizinkan melakukan HTTP Request ke backend Anda.
+
+**5.4 Perlindungan CSRF (Cross-Site Request Forgery)**
+Proteksi untuk mencegah eksekusi perintah tak terduga dari situs pihak ketiga.
+
+- **Aktif (Default):** Sangat disarankan untuk aplikasi berbasis Web/Browser dengan form HTML.
+- **Dinonaktifkan (`csrf.disable()`):** Biasanya dinonaktifkan jika aplikasi Anda adalah **REST API stateless** yang menggunakan token (seperti JWT) alih-alih Session Cookie.
+
+**5.5 Security Header (`headers`)**
+Mengatur header HTTP bawaan untuk perlindungan ekstra di tingkat browser, seperti:
+
+- **X-Frame-Options:** Mencegah serangan _Clickjacking_ (mencegah aplikasi Anda di-embed dalam `<iframe>`).
+- **Content Security Policy (CSP):** Mencegah serangan XSS.
+- **Strict-Transport-Security (HSTS):** Memaksa koneksi menggunakan HTTPS.j
+
+Contoh: 
+
+```java
+package com.example.demo.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            // 1. Matikan CSRF
+            .csrf(AbstractHttpConfigurer::disable)
+
+            // 2. Atur Otorisasi Endpoint (Aturan Akses URL)
+            .authorizeHttpRequests(auth -> auth
+                // Endpoint publik (bisa diakses tanpa login)
+                .requestMatchers("/", "/public/**", "/error", "/webjars/**").permitAll()
+                // Endpoint khusus role ADMIN
+                .requestMatchers("/admin/**").hasRole("ADMIN")
+                // Sisa endpoint lainnya wajib login
+                .anyRequest().authenticated()
+            )
+
+            // 3. Mekanisme Otentikasi Menggunakan OAuth2 / OIDC Login
+            .oauth2Login(oauth2 -> oauth2
+                // (Opsional) Mengarahkan ke halaman login kustom jika ada
+                // .loginPage("/login")
+                
+                // URL tujuan setelah berhasil login
+                .defaultSuccessUrl("/dashboard", true)
+                .userInfoEndpoint(userInfo -> userInfo  .oidcUserService(customOidcUserService) )
+                // URL tujuan jika login gagal
+                .failureUrl("/login?error=true")
+            )
+
+            // 4. Konfigurasi Logout
+            .logout(logout -> logout
+                .logoutSuccessUrl("/")
+                .invalidateHttpSession(true)
+                .clearAuthentication(true)
+                .deleteCookies("JSESSIONID")
+            );
+
+        return http.build();
+    }
+}
+```
+
+
+Contoh Custom OIDC user service: 
+
+```java
+package com.example.demo.service;
+
+import com.example.demo.entity.User;
+import com.example.demo.repository.UserRepository;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.stereotype.Service;
+
+@Service
+public class CustomOidcUserService extends OidcUserService {
+
+    private final UserRepository userRepository;
+
+    public CustomOidcUserService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @Override
+    public OidcUser loadUser(OidcUserRequest userRequest) throws OAuth2AuthenticationException {
+        // 1. Biarkan Spring Security mengekstrak OidcUser dasar dari ID Token
+        OidcUser oidcUser = super.loadUser(userRequest);
+
+        // 2. Ambil data dari ID Token (Claims)
+        String googleSub = oidcUser.getSubject(); // 'sub' (ID Unik Google)
+        String email = oidcUser.getEmail();
+        String name = oidcUser.getFullName();
+        String picture = oidcUser.getPicture();
+
+        // 3. Simpan atau Update ke Database Lokal
+        processUserLogin(googleSub, email, name, picture);
+
+        return oidcUser;
+    }
+
+    private void processUserLogin(String googleSub, String email, String name, String picture) {
+        userRepository.findByGoogleSub(googleSub)
+            .map(existingUser -> {
+                // Update data jika ada perubahan di profil Google
+                existingUser.setName(name);
+                existingUser.setPicture(picture);
+                return userRepository.save(existingUser);
+            })
+            .orElseGet(() -> {
+                // Jika belum ada, daftarkan user baru
+                User newUser = User.builder()
+                        .googleSub(googleSub)
+                        .email(email)
+                        .name(name)
+                        .picture(picture)
+                        .role("ROLE_USER")
+                        .build();
+                return userRepository.save(newUser);
+            });
+    }
+}
+```
