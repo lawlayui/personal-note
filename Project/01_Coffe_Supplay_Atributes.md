@@ -1,4 +1,4 @@
-### **1. Account Context**
+	### **1. Account Context**
 
 - **Aggregate Root / Entity:** `Account`
 - **Attributes:** `name`, `email`, `createdAt`, `updatedAt`
